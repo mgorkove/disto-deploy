@@ -22,7 +22,7 @@ spec:
             - configMapRef:
                 name: flask-config
           ports:
-            - containerPort: 5000
+            - containerPort: 80
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -42,9 +42,6 @@ spec:
         - name: frontend
           image: public.ecr.aws/v3z1c7w1/disto-frontend:latest
           imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: react-config
           ports:
             - containerPort: 80
 ---
@@ -53,23 +50,48 @@ kind: Service
 metadata:
   name: backend-service
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: backend
   ports:
     - protocol: TCP
-      port: 5000
-      targetPort: 5000
+      port: 80
+      targetPort: 80
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend-service
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: frontend
   ports:
     - protocol: TCP
       port: 80
       targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: disto-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /disto-api/
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80

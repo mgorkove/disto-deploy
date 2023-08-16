@@ -1,7 +1,3 @@
 # disto-deploy
 
-delete cluster:
-gcloud container clusters delete disto --zone us-west1
-
-get ip address of frontend:
-kubectl get svc frontend-service -o=jsonpath='{.status.loadBalancer.ingress[0].ip}'
+Follow the instructions [here](https://docs.distoai.com/self-hosting-aws/deploy) to deploy Disto on AWS.
