@@ -13,11 +13,6 @@ if [ -z "$GCP_REGION" ]; then
     exit 1
 fi
 
-if [ -z "$NEWRELIC_ACCOUNT_ID" ]; then
-    echo "Error: Missing --newrelic-account-id argument."
-    exit 1
-fi
-
 if [ -z "$FIREBASE_CREDENTIALS_PATH" ]; then
     echo "Error: Missing --firebase-credentials-path argument."
     exit 1
@@ -28,7 +23,8 @@ GCP_PROJECT_ID="disto-project-id"
 GCS_BUCKET_NAME="disto-bucket"
 GOOGLE_CREDENTIALS_PATH="disto-service-account-key.json"
 SERVICE_ACCOUNT_EMAIL="disto-service-account@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
-
+SERVICE_ACCOUNT_NAME=disto-service-account
+SERVICE_ACCOUNT_DISPLAY_NAME="Disto Service Account"
 
 # Create a project with a specified name and ID
 echo "Creating Disto project"
@@ -39,12 +35,12 @@ echo "Done creating Disto project"
 ORIGINAL_PROJECT_ID=$(gcloud config get-value project)
 
 # Set the project
-echo "Setting gcloud to Disto project ID: $GCP_PROJECT_ID"
-gcloud config set project $GCP_PROJECT_ID
+#echo "Setting gcloud to Disto project ID: $GCP_PROJECT_ID"
+#gcloud config set project $GCP_PROJECT_ID
 
 # Create a GCS bucket in a specified region
 echo "Creating Disto GCS bucket"
-gcloud storage buckets create $GCS_BUCKET_NAME --location=$GCP_REGION
+gcloud storage buckets create gs://$GCS_BUCKET_NAME --location=$GCP_REGION
 echo "Done creating Disto GCS bucket"
 
 # create firestore db
@@ -68,14 +64,31 @@ gcloud services enable secretmanager.googleapis.com
 # create new service account for disto
 echo "Creating Disto service account"
 
+gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME --display-name${SERVICE_ACCOUNT_DISPLAY_NAME} --project=${GCP_PROJECT_ID}
+
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/owner"
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/storage.admin"
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/container.admin"
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/datastore.owner"
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/secretmanager.admin"
 gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/secretmanager.secretAccessor"
+gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/iam.workloadIdentityUser"
+gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" --role="roles/iam.serviceAccountTokenCreator"
 
 gcloud iam service-accounts keys create $GOOGLE_CREDENTIALS_PATH --iam-account=${SERVICE_ACCOUNT_EMAIL}
+
+# associate Kubernetes service account with google cloud service account
+echo "Associating Kubernetes service account with Disto service account"
+kubectl annotate serviceaccount \
+  --namespace default \
+  default \
+  iam.gke.io/gcp-service-account=${SERVICE_ACCOUNT_EMAIL}
+
+gcloud iam service-accounts add-iam-policy-binding \                                         
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:forward-ace-395519.svc.id.goog[default/default]" \
+  407653381674-compute@developer.gserviceaccount.com
+
 echo "Done creating Disto service account"
 
 # Extract values from the Google credentials JSON file
@@ -102,10 +115,12 @@ FIREBASE_APP_ID=$(jq -r '.appId' $FIREBASE_CREDENTIALS_PATH)
 echo "Creating cluster ..."
 gcloud container clusters create-auto disto-cluster \
     --location=$GCP_REGION
+    --workload-pool=${GCP_PROJECT_ID}.svc.id.goog \
 
 
 gcloud container clusters get-credentials disto-cluster --zone $GCP_REGION
 echo "Done creating cluster"
+
 
 echo "Deploying Nginx Ingress Controller..."
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.0.4/deploy/static/provider/cloud/deploy.yaml
@@ -122,7 +137,9 @@ echo "Creating configmap ..."
 kubectl create configmap flask-config \
 --from-literal=PALM_MODEL_NAME=chat-bison@001 \
 --from-literal=GITHUB_APP_ID=292639 \
---from-literal=GOOGLE_APPLICATION_CREDENTIALS=~/disto/google_application_credentials.json \
+--from-literal=USE_GKE_GCLOUD_AUTH_PLUGIN=True \
+--from-literal=GCP_REGION=$GCP_REGION \
+--from-literal=GCS_BUCKET_NAME=$GCS_BUCKET_NAME \
 --from-literal=NEWRELIC_ACCOUNT_ID=$NEWRELIC_ACCOUNT_ID \
 --from-literal=GCP_CREDENTIALS_PROJECT_ID=$GCP_CREDENTIALS_PROJECT_ID \
 --from-literal=GCP_CREDENTIALS_PRIVATE_KEY_ID=$GCP_CREDENTIALS_PRIVATE_KEY_ID \
@@ -136,8 +153,7 @@ kubectl create configmap flask-config \
 --from-literal=FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID \
 --from-literal=FIREBASE_STORAGE_BUCKET=$FIREBASE_STORAGE_BUCKET \
 --from-literal=FIREBASE_MESSAGING_SENDER_ID=$FIREBASE_MESSAGING_SENDER_ID \
---from-literal=FIREBASE_APP_ID=$FIREBASE_APP_ID \
---from-literal=FIREBASE_MEASUREMENT_ID=$FIREBASE_MEASUREMENT_ID
+--from-literal=FIREBASE_APP_ID=$FIREBASE_APP_ID
 
 echo "Done creating configmap"
 
@@ -156,5 +172,5 @@ INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o=jsonpa
 echo "Access services via: http://$INGRESS_IP"
 
 # set gcloud back to original project ID
-echo "Setting gcloud back to original project ID: $ORIGINAL_PROJECT_ID"
-gcloud config set project $ORIGINAL_PROJECT_ID
+#echo "Setting gcloud back to original project ID: $ORIGINAL_PROJECT_ID"
+#gcloud config set project $ORIGINAL_PROJECT_ID
