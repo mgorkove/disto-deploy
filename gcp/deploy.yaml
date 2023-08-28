@@ -17,8 +17,6 @@ spec:
           image: public.ecr.aws/v3z1c7w1/disto-backend-gcp:latest
           imagePullPolicy: Always
           envFrom:
-            - secretRef:
-                name: flask-secrets
             - configMapRef:
                 name: flask-config
           ports:
